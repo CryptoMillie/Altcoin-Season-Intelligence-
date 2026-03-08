@@ -1,0 +1,234 @@
+     1|export async function GET() {
+     2|  try {
+     3|    // Fetch data from multiple sources
+     4|    const [
+     5|      ethBtcRes,
+     6|      fearGreedRes,
+     7|      altseasonRes
+     8|    ] = await Promise.all([
+     9|      // ETH/BTC Ratio
+    10|      fetch('https://api.coingecko.com/api/v3/coins/ethereum'),
+    11|      // Fear & Greed Index
+    12|      fetch('https://api.alternative.me/fng/'),
+    13|      // Altcoin Season Index
+    14|      fetch('https://www.blockchaincenter.net/api/altcoin-season-index/')
+    15|    ]);
+    16|
+    17|    const ethData = await ethBtcRes.json();
+    18|    const fearGreedData = await fearGreedRes.json();
+    19|    let altseasonData = null;
+    20|    try {
+    21|      altseasonData = await altseasonRes.json();
+    22|    } catch (e) {
+    23|      // Fallback if API is unavailable
+    24|      altseasonData = { value: 50 };
+    25|    }
+    26|
+    27|    // Fetch BTC chart and global data for dominance calculation
+    28|    // Note: /global/market_cap_chart is PRO-only, so we use /global for current dominance
+    29|    // and BTC chart for historical data and market cap calculations
+    30|    const [btcChartRes, globalRes] = await Promise.allSettled([
+    31|      fetch('https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=90&interval=daily')
+    32|        .then(r => r.json()),
+    33|      fetch('https://api.coingecko.com/api/v3/global')
+    34|        .then(r => r.json()),
+    35|    ]);
+    36|
+    37|    const btcMcaps = btcChartRes.status === 'fulfilled' ? btcChartRes.value?.market_caps ?? [] : [];
+    38|    const globalData = globalRes.status === 'fulfilled' ? globalRes.value?.data : null;
+    39|
+    40|    // Get current BTC dominance from global endpoint (reliable)
+    41|    const btcDom = globalData?.market_cap_percentage?.btc ?? 0;
+    42|    
+    43|    // Derive market caps from BTC chart data
+    44|    const btcMcapNow = btcMcaps.at(-1)?.[1] ?? 0;
+    45|    // Calculate total market cap from BTC dominance: BTC mcap / (btcDom / 100)
+    46|    const totalMcapNow = btcDom > 0 ? (btcMcapNow / (btcDom / 100)) : 0;
+    47|    const totalMcap = totalMcapNow;
+    48|    const total2Mcap = totalMcapNow - btcMcapNow;
+    49|
+    50|    // Build 90-day dominance history from chart data
+    51|    // For historical data, we estimate dominance using BTC market cap trends
+    52|    const domHistory = [];
+    53|    const total2History = [];
+    54|    for (let i = 0; i < btcMcaps.length; i++) {
+    55|      // Estimate total market cap at this point using current dominance ratio
+    56|      // This is an approximation since we don't have historical total market cap
+    57|      const estimatedTotalMcap = btcDom > 0 ? (btcMcaps[i][1] / (btcDom / 100)) : 0;
+    58|      const dom = estimatedTotalMcap > 0 ? (btcMcaps[i][1] / estimatedTotalMcap) * 100 : btcDom;
+    59|      domHistory.push({ date: new Date(btcMcaps[i][0]).toISOString().split('T')[0], value: parseFloat(dom.toFixed(2)) });
+    60|      total2History.push({ date: new Date(btcMcaps[i][0]).toISOString().split('T')[0], value: estimatedTotalMcap - btcMcaps[i][1] });
+    61|    }
+    62|
+    63|    // Replace stablecoin fetch with DeFiLlama
+    64|    let stableMcap = 0;
+    65|    let stableHistory = [];
+    66|    try {
+    67|      const stableRes = await fetch('https://stablecoins.llama.fi/stablecoins?includePrices=true', {
+    68|        next: { revalidate: 600 }
+    69|      });
+    70|      const stableJson = await stableRes.json();
+    71|      const coins = stableJson?.peggedAssets ?? [];
+    72|      // Sum circulating USD across all stablecoins
+    73|      stableMcap = coins.reduce((sum, coin) => {
+    74|        return sum + (coin?.circulating?.peggedUSD ?? 0);
+    75|      }, 0);
+    76|      // For history, fetch the aggregate chart
+    77|      const stableChartRes = await fetch('https://stablecoins.llama.fi/stablecoincharts/all?stablecoin=1', {
+    78|        next: { revalidate: 600 }
+    79|      });
+    80|      const stableChart = await stableChartRes.json();
+    81|      if (Array.isArray(stableChart)) {
+    82|        stableHistory = stableChart.slice(-90).map(d => ({
+    83|          date: new Date(d.date * 1000).toISOString().split('T')[0],
+    84|          value: (d?.totalCirculatingUSD?.peggedUSD ?? 0) / 1e9
+    85|        }));
+    86|      }
+    87|    } catch (e) {
+    88|      stableMcap = 313e9; // known approximate fallback
+    89|    }
+    90|
+    91|    const ethBtcRatio = ethData.market_data?.current_price?.btc || 0;
+    92|    const fearGreedValue = parseInt(fearGreedData.data?.[0]?.value) || 50;
+    93|
+    94|    // Proper altseason index using 90d BTC vs TOTAL2 performance
+    95|    const btcPerf90d = btcMcaps.length >= 2
+    96|      ? ((btcMcaps.at(-1)[1] - btcMcaps[0][1]) / btcMcaps[0][1]) * 100
+    97|      : 0;
+    98|    const t2Perf90d = total2History.length >= 2
+    99|      ? ((total2History.at(-1).value - total2History[0].value) / total2History[0].value) * 100
+   100|      : 0;
+   101|    // Alt outperformance vs BTC over 90 days
+   102|    // Map: alts beating BTC by 20%+ = ~100, parity = ~50, BTC beating alts by 20%+ = ~0
+   103|    const altOutperf = t2Perf90d - btcPerf90d;
+   104|    const altSeasonIndex = Math.max(0, Math.min(100, Math.round(50 + (altOutperf * 1.2))));
+   105|
+   106|    // Generate mock history data for ETH/BTC and Fear & Greed
+   107|    const generateHistory = (baseValue, variance = 0.1) => {
+   108|      const history = [];
+   109|      for (let i = 90; i >= 0; i--) {
+   110|        const date = new Date();
+   111|        date.setDate(date.getDate() - i);
+   112|        history.push({
+   113|          date: date.toISOString().split('T')[0],
+   114|          value: baseValue * (1 + (Math.random() - 0.5) * variance)
+   115|        });
+   116|      }
+   117|      return history;
+   118|    };
+   119|
+   120|    // Determine signals
+   121|    const domSignal = btcDom > 60 ? 'bearish' : btcDom >= 54 ? 'neutral' : 'bullish';
+   122|    const ethBtcSignal = ethBtcRatio >= 0.03 ? 'bullish' : 'neutral';
+   123|    const marketCapTrend = totalMcapNow > 0 ? ((totalMcaps.at(-1)[1] - totalMcaps[0][1]) / totalMcaps[0][1]) * 100 : 0;
+   124|    const marketCapSignal = marketCapTrend > 5 ? 'bullish' : marketCapTrend > 0 ? 'neutral' : 'bearish';
+   125|    const total2Signal = total2Mcap > 500000000000 ? 'bullish' : total2Mcap > 300000000000 ? 'neutral' : 'bearish';
+   126|    const stablecoinSignal = stableMcap > 200000000000 ? 'bullish' : 'neutral';
+   127|    const fearGreedSignal = fearGreedValue <= 25 ? 'bullish' : fearGreedValue <= 50 ? 'neutral' : 'bearish';
+   128|    const altseasonSignal = altSeasonIndex >= 75 ? 'bullish' : altSeasonIndex >= 50 ? 'neutral' : 'bearish';
+   129|
+   130|    // Generate altseason history
+   131|    const altseasonHistory = [];
+   132|    for (let i = 0; i < Math.min(domHistory.length, total2History.length); i++) {
+   133|      const btcPerf = i > 0 ? ((btcMcaps[i][1] - btcMcaps[0][1]) / btcMcaps[0][1]) * 100 : 0;
+   134|      const t2Perf = i > 0 ? ((total2History[i].value - total2History[0].value) / total2History[0].value) * 100 : 0;
+   135|      const outperf = t2Perf - btcPerf;
+   136|      const idx = Math.max(0, Math.min(100, Math.round(50 + (outperf * 1.2))));
+   137|      altseasonHistory.push({
+   138|        date: domHistory[i].date,
+   139|        value: idx
+   140|      });
+   141|    }
+   142|
+   143|    const indicators = [
+   144|      {
+   145|        id: 1,
+   146|        label: 'BTC Dominance',
+   147|        value: `${btcDom.toFixed(1)}%`,
+   148|        signal: domSignal,
+   149|        history: domHistory.length > 0 ? domHistory : generateHistory(btcDom, 0.05),
+   150|        threshold: '< 54%'
+   151|      },
+   152|      {
+   153|        id: 2,
+   154|        label: 'ETH/BTC Ratio',
+   155|        value: ethBtcRatio.toFixed(4),
+   156|        signal: ethBtcSignal,
+   157|        history: generateHistory(ethBtcRatio, 0.1),
+   158|        threshold: '≥ 0.03'
+   159|      },
+   160|      {
+   161|        id: 3,
+   162|        label: 'Total Market Cap',
+   163|        value: `$${(totalMcapNow / 1e12).toFixed(2)}T`,
+   164|        signal: marketCapSignal,
+   165|        history: totalMcaps.length > 0 ? totalMcaps.slice(-90).map(d => ({ date: new Date(d[0]).toISOString().split('T')[0], value: d[1] / 1e12 })) : generateHistory(totalMcapNow / 1e12, 0.08),
+   166|        threshold: 'Rising 90d trend'
+   167|      },
+   168|      {
+   169|        id: 4,
+   170|        label: 'TOTAL2 (ex-BTC)',
+   171|        value: `$${(total2Mcap / 1e12).toFixed(2)}T`,
+   172|        signal: total2Signal,
+   173|        history: total2History.length > 0 ? total2History.slice(-90).map(d => ({ date: d.date, value: d.value / 1e12 })) : generateHistory(total2Mcap / 1e12, 0.1),
+   174|        threshold: '30d breakout'
+   175|      },
+   176|      {
+   177|        id: 5,
+   178|        label: 'Stablecoin Supply',
+   179|        value: `$${(stableMcap / 1e9).toFixed(1)}B`,
+   180|        signal: stablecoinSignal,
+   181|        history: stableHistory.length > 0 ? stableHistory : generateHistory(stableMcap / 1e9, 0.03),
+   182|        threshold: '> $200B'
+   183|      },
+   184|      {
+   185|        id: 6,
+   186|        label: 'Fear & Greed Index',
+   187|        value: fearGreedValue,
+   188|        signal: fearGreedSignal,
+   189|        history: generateHistory(fearGreedValue, 0.2),
+   190|        threshold: '0-25 (Extreme Fear)'
+   191|      },
+   192|      {
+   193|        id: 7,
+   194|        label: 'Altcoin Season Index',
+   195|        value: altSeasonIndex,
+   196|        signal: altseasonSignal,
+   197|        history: altseasonHistory.length > 0 ? altseasonHistory : generateHistory(altSeasonIndex, 0.15),
+   198|        threshold: '≥ 75'
+   199|      }
+   200|    ];
+   201|
+   202|    // Calculate counts for gauge
+   203|    let bullish = 0, neutral = 0, bearish = 0;
+   204|    indicators.forEach(ind => {
+   205|      if (ind.signal === 'bullish') bullish++;
+   206|      else if (ind.signal === 'neutral') neutral++;
+   207|      else bearish++;
+   208|    });
+   209|
+   210|    // Log for verification
+   211|    console.log('btcDom:', btcDom);
+   212|    console.log('stableMcap:', stableMcap);
+   213|    console.log('altSeasonIndex:', altSeasonIndex);
+   214|
+   215|    return Response.json({ 
+   216|      indicators,
+   217|      score: altSeasonIndex,
+   218|      probability: altSeasonIndex,
+   219|      bullish,
+   220|      neutral,
+   221|      bearish
+   222|    }, {
+   223|      headers: {
+   224|        'Cache-Control': 'public, s-maxage=600, stale-while-revalidate=1200'
+   225|      }
+   226|    });
+   227|  } catch (error) {
+   228|    console.error('API Error:', error);
+   229|    return Response.json(
+   230|      { error: 'Failed to fetch market data', details: error.message },
+   231|      { status: 500 }
+   232|    );
+   233|  }
+   234|}
