@@ -95,7 +95,13 @@ export default function Home() {
           <>
             {/* Gauge Section */}
             <section className="mb-8 md:mb-12">
-              <GaugeMeter score={score} />
+              <GaugeMeter 
+                score={data.indicators.filter(i => i.signal === 'bullish').length + data.indicators.filter(i => i.signal === 'neutral').length * 0.5} 
+                probability={data.probability || score} 
+                bullish={data.bullish || 0}
+                neutral={data.neutral || 0}
+                bearish={data.bearish || 0}
+              />
             </section>
 
             {/* Indicators Grid */}
