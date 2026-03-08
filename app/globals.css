@@ -1,0 +1,93 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary: #07080d;
+  --bg-card: #0f1120;
+  --signal-bullish: #00ff88;
+  --signal-neutral: #f5a623;
+  --signal-bearish: #ff4560;
+  --accent-cyan: #00d4ff;
+}
+
+body {
+  background-color: var(--bg-primary);
+  font-family: 'Space Mono', monospace;
+}
+
+.font-display {
+  font-family: 'Orbitron', sans-serif;
+}
+
+.font-mono {
+  font-family: 'Space Mono', monospace;
+}
+
+/* Custom glow effects */
+.glow-bullish {
+  box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
+}
+
+.glow-neutral {
+  box-shadow: 0 0 20px rgba(245, 166, 35, 0.3);
+}
+
+.glow-bearish {
+  box-shadow: 0 0 20px rgba(255, 69, 96, 0.3);
+}
+
+.glow-cyan {
+  box-shadow: 0 0 30px rgba(0, 212, 255, 0.2);
+}
+
+/* Ambient background effect */
+.ambient-glow {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 800px;
+  height: 800px;
+  background: radial-gradient(circle, rgba(0, 212, 255, 0.03) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Card hover effect */
+.card-hover {
+  transition: all 0.3s ease;
+}
+
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+
+/* Signal badge animations */
+@keyframes pulse-bullish {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0, 255, 136, 0.4); }
+  50% { box-shadow: 0 0 0 10px rgba(0, 255, 136, 0); }
+}
+
+@keyframes pulse-neutral {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 166, 35, 0.4); }
+  50% { box-shadow: 0 0 0 10px rgba(245, 166, 35, 0); }
+}
+
+@keyframes pulse-bearish {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 69, 96, 0.4); }
+  50% { box-shadow: 0 0 0 10px rgba(255, 69, 96, 0); }
+}
+
+.animate-pulse-bullish {
+  animation: pulse-bullish 2s infinite;
+}
+
+.animate-pulse-neutral {
+  animation: pulse-neutral 2s infinite;
+}
+
+.animate-pulse-bearish {
+  animation: pulse-bearish 2s infinite;
+}
