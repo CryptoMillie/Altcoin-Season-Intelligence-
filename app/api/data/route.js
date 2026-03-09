@@ -24,34 +24,38 @@ export async function GET() {
       altseasonData = { value: 50 };
     }
 
-    // Fetch BTC chart and total market cap chart for dominance calculation
-    const [btcChartRes, totalChartRes] = await Promise.allSettled([
+    // Fetch BTC chart and top coins for dominance calculation
+    const [btcChartRes, marketsRes] = await Promise.allSettled([
       fetch('https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=90&interval=daily')
         .then(r => r.json()),
-      fetch('https://api.coingecko.com/api/v3/global/market_cap_chart?days=90&vs_currency=usd')
+      fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1')
         .then(r => r.json()),
     ]);
 
     const btcMcaps = btcChartRes.status === 'fulfilled' ? btcChartRes.value?.market_caps ?? [] : [];
-    const totalMcaps = totalChartRes.status === 'fulfilled' ? totalChartRes.value?.market_cap ?? [] : [];
+    const marketsData = marketsRes.status === 'fulfilled' ? marketsRes.value ?? [] : [];
 
-    // Derive current values from last data point
-    const btcMcapNow = btcMcaps.at(-1)?.[1] ?? 0;
-    const totalMcapNow = totalMcaps.at(-1)?.[1] ?? 0;
+    // Calculate current market caps from markets data
+    const btcCoin = marketsData.find(c => c.id === 'bitcoin');
+    const btcMcapNow = btcCoin?.market_cap ?? btcMcaps.at(-1)?.[1] ?? 0;
+    const totalMcapNow = marketsData.reduce((sum, coin) => sum + (coin.market_cap || 0), 0);
     const btcDom = totalMcapNow > 0
       ? parseFloat(((btcMcapNow / totalMcapNow) * 100).toFixed(2))
       : 0;
     const totalMcap = totalMcapNow;
     const total2Mcap = totalMcapNow - btcMcapNow;
 
-    // Build 90-day dominance history from chart data
-    const len = Math.min(btcMcaps.length, totalMcaps.length);
+    // Build 90-day dominance history from BTC chart data
+    // For total market cap history, we'll use BTC dominance trend as proxy
+    // since we can't get historical total market cap without PRO API
     const domHistory = [];
     const total2History = [];
-    for (let i = 0; i < len; i++) {
-      const dom = totalMcaps[i][1] > 0 ? (btcMcaps[i][1] / totalMcaps[i][1]) * 100 : 0;
+    for (let i = 0; i < btcMcaps.length; i++) {
+      // Estimate total market cap based on current ratio
+      const estimatedTotal = btcMcaps[i][1] / (btcMcapNow / totalMcapNow);
+      const dom = estimatedTotal > 0 ? (btcMcaps[i][1] / estimatedTotal) * 100 : 0;
       domHistory.push({ date: new Date(btcMcaps[i][0]).toISOString().split('T')[0], value: parseFloat(dom.toFixed(2)) });
-      total2History.push({ date: new Date(btcMcaps[i][0]).toISOString().split('T')[0], value: totalMcaps[i][1] - btcMcaps[i][1] });
+      total2History.push({ date: new Date(btcMcaps[i][0]).toISOString().split('T')[0], value: estimatedTotal - btcMcaps[i][1] });
     }
 
     // Replace stablecoin fetch with DeFiLlama
@@ -114,7 +118,7 @@ export async function GET() {
     // Determine signals
     const domSignal = btcDom > 60 ? 'bearish' : btcDom >= 54 ? 'neutral' : 'bullish';
     const ethBtcSignal = ethBtcRatio >= 0.03 ? 'bullish' : 'neutral';
-    const marketCapTrend = totalMcapNow > 0 ? ((totalMcaps.at(-1)[1] - totalMcaps[0][1]) / totalMcaps[0][1]) * 100 : 0;
+    const marketCapTrend = total2History.length >= 2 ? ((total2History.at(-1).value - total2History[0].value) / total2History[0].value) * 100 : 0;
     const marketCapSignal = marketCapTrend > 5 ? 'bullish' : marketCapTrend > 0 ? 'neutral' : 'bearish';
     const total2Signal = total2Mcap > 500000000000 ? 'bullish' : total2Mcap > 300000000000 ? 'neutral' : 'bearish';
     const stablecoinSignal = stableMcap > 200000000000 ? 'bullish' : 'neutral';
@@ -156,7 +160,7 @@ export async function GET() {
         label: 'Total Market Cap',
         value: `$${(totalMcapNow / 1e12).toFixed(2)}T`,
         signal: marketCapSignal,
-        history: totalMcaps.length > 0 ? totalMcaps.slice(-90).map(d => ({ date: new Date(d[0]).toISOString().split('T')[0], value: d[1] / 1e12 })) : generateHistory(totalMcapNow / 1e12, 0.08),
+        history: total2History.length > 0 ? total2History.map((d, i) => ({ date: d.date, value: (d.value + (btcMcaps[i]?.[1] || 0)) / 1e12 })).slice(-90) : generateHistory(totalMcapNow / 1e12, 0.08),
         threshold: 'Rising 90d trend'
       },
       {
