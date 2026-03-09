@@ -1,3 +1,5 @@
+export const runtime = "nodejs";
+
 export async function GET() {
   try {
     // Fetch BTC chart and global data (market_cap_chart is PRO only)
