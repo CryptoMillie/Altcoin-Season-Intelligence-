@@ -1,11 +1,22 @@
 export async function GET() {
   try {
     // Fetch BTC chart and global data (market_cap_chart is PRO only)
+    // Use cache-busting headers to ensure live data
     const [btcChartRes, globalRes] = await Promise.allSettled([
-      fetch('https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=90&interval=daily')
-        .then(r => r.json()),
-      fetch('https://api.coingecko.com/api/v3/global')
-        .then(r => r.json()),
+      fetch('https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=90&interval=daily', {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        }
+      }).then(r => r.json()),
+      fetch('https://api.coingecko.com/api/v3/global', {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        }
+      }).then(r => r.json()),
     ]);
 
     const btcMcaps = btcChartRes.status === 'fulfilled' ? btcChartRes.value?.market_caps ?? [] : [];
@@ -52,7 +63,11 @@ export async function GET() {
     let stableHistory = [];
     try {
       const stableRes = await fetch('https://stablecoins.llama.fi/stablecoins?includePrices=true', {
-        next: { revalidate: 600 }
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        }
       });
       const stableJson = await stableRes.json();
       const coins = stableJson?.peggedAssets ?? [];
@@ -62,7 +77,11 @@ export async function GET() {
       }, 0);
       // For history, fetch the aggregate chart
       const stableChartRes = await fetch('https://stablecoins.llama.fi/stablecoincharts/all?stablecoin=1', {
-        next: { revalidate: 600 }
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        }
       });
       const stableChart = await stableChartRes.json();
       if (Array.isArray(stableChart)) {

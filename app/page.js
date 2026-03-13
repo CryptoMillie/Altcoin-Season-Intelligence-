@@ -9,16 +9,33 @@ export default function Home() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    fetch('/api/data')
-      .then(res => res.json())
-      .then(data => {
+    const fetchData = async () => {
+      try {
+        // Add cache-busting query param to ensure fresh data
+        const res = await fetch(`/api/data?t=${Date.now()}`, {
+          cache: 'no-store',
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
+          }
+        });
+        const data = await res.json();
         setData(data);
         setLoading(false);
-      })
-      .catch(err => {
+      } catch (err) {
         setError(err.message);
         setLoading(false);
-      });
+      }
+    };
+
+    // Initial fetch
+    fetchData();
+
+    // Set up polling every 30 seconds for live data updates
+    const interval = setInterval(fetchData, 30000);
+
+    // Cleanup interval on unmount
+    return () => clearInterval(interval);
   }, []);
 
   if (loading) {
